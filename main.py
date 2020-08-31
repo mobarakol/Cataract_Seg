@@ -16,21 +16,21 @@ import torch.optim as optim
 import torch.nn.functional as F
 
 #custom
-from instrument_dataset import SurgicalDataset, SurgicalDataset_seg
+from datasets import SurgicalDataset
 from model import ST_MTL_SEG
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2"
 
 args = {
-    'num_class': 8,
-    'num_gpus':3,
+    'num_class': 36,
     'lr': 0.0001,
     'batch_size': 6,
     'max_epoch': 150,
     'lr_decay': 0.9,
     'weight_decay': 1e-4,
     'opt': 'adam',
-    'log_interval': 50,
+    'log_interval': 500,
+    'data_root':'CaDISv2/Video',
     'ckpt_dir': 'ckpt/ours/'}
 
 if not os.path.exists(args['ckpt_dir']):
@@ -48,7 +48,7 @@ class CrossEntropyLoss2d(torch.nn.Module):
     def forward(self, inputs, targets):
         return self.nll_loss(F.log_softmax(inputs), targets)
 
-def good_worker_init_fn(worker_id):
+def worker_init_fn(worker_id):
     np.random.seed(random.randint(0, 2 ** 32 - 1))
 
 
@@ -64,7 +64,7 @@ def seed_everything(seed=12):
 
 def train(train_loader, model, criterion, optimizer, epoch, epoch_iters):
     model.train()
-    for batch_idx, (inputs, labels_seg, _) in enumerate(train_loader):
+    for batch_idx, (inputs, labels_seg) in enumerate(train_loader):
         inputs, labels_seg = Variable(inputs).cuda(), Variable(labels_seg).cuda()
         optimizer.zero_grad()
         pred_seg = model(inputs)
@@ -81,7 +81,7 @@ def validate(valid_loader, model):
     dice_valid = [[0 for x in range(w)] for y in range(h)]
     model.eval()
     with torch.no_grad():
-        for batch_idx, (inputs, labels_seg, _) in enumerate(valid_loader):
+        for batch_idx, (inputs, labels_seg) in enumerate(valid_loader):
             inputs, labels_seg = Variable(inputs).cuda(), np.array(labels_seg)
             pred_seg = model(inputs)
             pred_seg = pred_seg.data.max(1)[1].squeeze_(1).cpu().numpy()
@@ -101,10 +101,12 @@ def validate(valid_loader, model):
 
 if __name__ == '__main__':
     seed_everything()
-    dataset_train = SurgicalDataset_seg(data_seq = [1,2,3,5,6,8], isTrain=True)
-    train_loader = DataLoader(dataset=dataset_train, batch_size=args['batch_size'], shuffle=True, num_workers=2, worker_init_fn=good_worker_init_fn)   
-    dataset_valid = SurgicalDataset_seg(data_seq = [4,7], isTrain=False)
-    valid_loader = DataLoader(dataset=dataset_valid, batch_size=args['batch_size'], shuffle=False, num_workers=2, worker_init_fn=good_worker_init_fn)
+    train_set = [1,3,4,5,6,7,8,9,10,11,13,14,15,16,17,18,19,20,21,23,24,25]
+    test_set = [2,12,22]
+    dataset_train = SurgicalDataset(data_root=args['data_root'],data_seq=train_set, isTrain=True)
+    train_loader = DataLoader(dataset=dataset_train, batch_size=args['batch_size'], shuffle=True, num_workers=2, worker_init_fn=worker_init_fn)   
+    dataset_valid = SurgicalDataset(data_root=args['data_root'],data_seq=test_set, isTrain=False)
+    valid_loader = DataLoader(dataset=dataset_valid, batch_size=args['batch_size'], shuffle=False, num_workers=2, worker_init_fn=worker_init_fn)
     model = ST_MTL_SEG(num_classes=args['num_class']).cuda()
     model = torch.nn.parallel.DataParallel(model)
     optimizer = optim.Adam(model.parameters(), lr=args['lr'])
@@ -115,7 +117,7 @@ if __name__ == '__main__':
     best_epoch = 0
     for epoch in range( args['max_epoch']):
         train(train_loader, model, criterion, optimizer, epoch, epoch_iters)
-        torch.save(model.state_dict(), os.path.join(args['ckpt_dir'], str(epoch) + '.pth.tar'))
+        
         dice_valid = validate(valid_loader, model)
         avg_dice = []
         each = []
@@ -130,7 +132,8 @@ if __name__ == '__main__':
         if np.mean(avg_dice) > best_dice:
             best_dice = np.mean(avg_dice)
             best_epoch = epoch
+            torch.save(model.state_dict(), os.path.join(args['ckpt_dir'], 'best.pth.tar'))
 
-        print('Epoch:%d ' % epoch, 'Avg Dice:%.4f %s ' % (np.mean(avg_dice), str(each)),
+        print('Epoch:%d ' % epoch, 'Avg Dice:%.4f' %(np.mean(avg_dice)),
               'Best Avg=%d : %.4f ' % (best_epoch, best_dice))
 

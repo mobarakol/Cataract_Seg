@@ -193,9 +193,13 @@ class Segmentation_Decoder(nn.Module):
 
         # Seg Decoder blocks
         c = self.center(self.pool(e4))
+        #e4 = F.upsample(e4, c.size()[2:], mode='bilinear', align_corners=True)
+        c = F.upsample(c, e4.size()[2:], mode='bilinear', align_corners=True)
         d4 = self.decoder5(c, e4)
         d3 = self.decoder4(d4, e3)
+        
         d2 = self.decoder3(d3, e2)
+        d2 = F.upsample(d2, e1.size()[2:], mode='bilinear', align_corners=True)
         d1 = self.decoder2(d2, e1)
         x_new = F.upsample(x, d1.size()[2:], mode='bilinear', align_corners=True)
         d0 = self.decoder1(d1, x_new)
